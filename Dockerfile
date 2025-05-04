@@ -5,9 +5,12 @@ WORKDIR /app
 # Copy your application code
 COPY . .
 
+# Configure conda to use conda activate
+RUN conda init bash && \
+    echo "conda activate AudioX" >> ~/.bashrc
+
 # Create conda environment
-RUN conda create -n AudioX python=3.8.20 -y && \
-    echo "source activate AudioX" > ~/.bashrc
+RUN conda create -n AudioX python=3.8.20 -y
 
 SHELL ["/bin/bash", "--login", "-c"]
 
@@ -26,7 +29,7 @@ RUN mkdir -p model && \
 RUN echo 'import torch\nimport gradio as gr\nfrom stable_audio_tools import get_pretrained_model\nfrom stable_audio_tools.inference.generation import generate_diffusion_cond\nfrom stable_audio_tools.data.utils import read_video\n\n# Initialize model\ndevice = "cuda" if torch.cuda.is_available() else "cpu"\nmodel, model_config = get_pretrained_model("HKUSTAudio/AudioX")\nmodel = model.to(device)\nsample_rate = model_config["sample_rate"]\nsample_size = model_config["sample_size"]\ntarget_fps = model_config.get("video_fps", 10)\n\ndef generate_audio(text_prompt, video_file=None, seconds_total=10):\n    conditioning = [{\n        "text_prompt": text_prompt,\n        "video_prompt": None if video_file is None else [read_video(video_file.name, seek_time=0, duration=seconds_total, target_fps=target_fps).unsqueeze(0)],\n        "seconds_start": 0,\n        "seconds_total": seconds_total\n    }]\n    \n    audio = generate_diffusion_cond(\n        model=model,\n        steps=50,\n        cfg_scale=7.0,\n        conditioning=conditioning,\n        sample_size=sample_size,\n        device=device\n    )\n    \n    audio = audio.to(torch.float32).div(torch.max(torch.abs(audio))).clamp(-1, 1).cpu().numpy()\n    return (sample_rate, audio)\n\n# Create Gradio interface\ndemo = gr.Interface(\n    fn=generate_audio,\n    inputs=[\n        gr.Textbox(label="Text Prompt", placeholder="Enter a description for the audio to generate..."),\n        gr.Video(label="Input Video (Optional)"),\n        gr.Slider(minimum=5, maximum=30, value=10, step=5, label="Duration (seconds)")\n    ],\n    outputs=gr.Audio(label="Generated Audio"),\n    title="AudioX: Diffusion Transformer for Anything-to-Audio Generation",\n    description="Generate audio or music from text and video inputs using AudioX.",\n    examples=[\n        ["Peaceful piano music with gentle strings", None, 10],\n        ["Birds chirping in a forest", None, 10],\n        ["Upbeat electronic dance music with synths", None, 10]\n    ]\n)\n\n# Launch the interface\ndemo.queue().launch(server_name="0.0.0.0", server_port=7860, share=True)' > /app/run_gradio.py
 
 # Create startup script
-RUN echo '#!/bin/bash\nsource activate AudioX\npython /app/run_gradio.py' > /app/start.sh && \
+RUN echo '#!/bin/bash\nsource ~/.bashrc\npython /app/run_gradio.py' > /app/start.sh && \
     chmod +x /app/start.sh
 
 # Expose the port that Gradio runs on
